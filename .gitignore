@@ -1,0 +1,60 @@
+# 构建目录
+build/
+Build/
+BUILD/
+.cmake/
+
+# 可执行文件
+*.exe
+*.out
+*.app
+lbe_solver
+
+# VTK输出结果
+vtk_output/
+VTK_OUTPUT/
+vtk/
+
+# CSV结果文件
+*.csv
+*.CSV
+
+# IDE和编辑器文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.vs/
+*.user
+*.sdf
+*.opensdf
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+*.log
+
+# CMake生成的文件
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+CTestTestfile.cmake
+Testing/
+
+# 备份文件
+*.bak
+*.backup
+*.orig
+*.old
+
+# 其他不需要的文件
+*.tmp
+*.temp
+.cache/
+
+# 如果需要排除某些特定的目录或文件，可以在这里添加
+# 例如：
+# data/
+# results/
