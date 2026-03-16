@@ -42,18 +42,18 @@ LBESolver::LBESolver(const GridSize& grid_size, const SimulationParams& params)
 void LBESolver::initializeEquilibrium() {
     const int nx = grid_size_.nx;
     const int ny = grid_size_.ny;
-    
+
     #pragma omp parallel for collapse(2)
     for (int i = 0; i < nx; i++) {
         for (int j = 0; j < ny; j++) {
             const double rho_val = 1.0;
             const double ux_val = 0.0;
             const double uy_val = 0.0;
-            
+
             for (int alpha = 0; alpha < Q; alpha++) {
                 const double eu = EX[alpha] * ux_val + EY[alpha] * uy_val;
                 const double uu = ux_val * ux_val + uy_val * uy_val;
-                
+
                 feq_[i][j][alpha] = OMEGA[alpha] * rho_val *
                                   (1.0 + eu / CS2 + 0.5 * (eu * eu) / (CS2 * CS2) - 0.5 * uu / CS2);
                 f_[i][j][alpha] = feq_[i][j][alpha];
@@ -62,150 +62,35 @@ void LBESolver::initializeEquilibrium() {
     }
 }
 
-void LBESolver::setupCircularBoundary(double radius, double center_x, double center_y,
-                                      const std::vector<double>& boundary_velocity) {
-    const int num_points = 100;
-    boundary_points_.clear();
-    boundary_points_.reserve(num_points);
-    
-    const double ds = 2.0 * M_PI * radius / num_points;
-    
-    for (int l = 0; l < num_points; l++) {
-        const double angle = 2.0 * M_PI * l / num_points;
-        const double x = center_x + radius * std::cos(angle);
-        const double y = center_y + radius * std::sin(angle);
-        
-        boundary_points_.emplace_back(x, y, boundary_velocity[0], boundary_velocity[1], ds);
-    }
-    
-    buildMatrixA();
-    computeInverseMatrix();
-}
-
-double LBESolver::deltaFunction(double r) const {
-    const double abs_r = std::abs(r);
-    if (abs_r <= 2.0) {
-        return 0.25 * (1.0 + std::cos(M_PI * abs_r / 2.0));
-    }
-    return 0.0;
-}
-
-double LBESolver::interpolationD(int i, int j, double x_B, double y_B) const {
-    const double dx = static_cast<double>(i) - x_B;
-    const double dy = static_cast<double>(j) - y_B;
-    return deltaFunction(dx) * deltaFunction(dy);
-}
-
-void LBESolver::buildMatrixA() {
-    const int n_boundary = static_cast<int>(boundary_points_.size());
-    const int matrix_size = n_boundary * 2;
-    
-    A_matrix_.assign(matrix_size, std::vector<double>(matrix_size, 0.0));
-    
-    for (int l = 0; l < n_boundary; l++) {
-        for (int m = 0; m < n_boundary; m++) {
-            double sum_x = 0.0, sum_y = 0.0;
-            
-            const int x_start = std::max(0, static_cast<int>(boundary_points_[l].x - 3));
-            const int x_end = std::min(grid_size_.nx, static_cast<int>(boundary_points_[l].x + 4));
-            const int y_start = std::max(0, static_cast<int>(boundary_points_[l].y - 3));
-            const int y_end = std::min(grid_size_.ny, static_cast<int>(boundary_points_[l].y + 4));
-            
-            for (int i = x_start; i < x_end; i++) {
-                for (int j = y_start; j < y_end; j++) {
-                    const double D_il = interpolationD(i, j, boundary_points_[l].x, boundary_points_[l].y);
-                    const double D_im = interpolationD(i, j, boundary_points_[m].x, boundary_points_[m].y);
-                    
-                    sum_x += D_il * D_im * boundary_points_[m].ds;
-                    sum_y += D_il * D_im * boundary_points_[m].ds;
-                }
-            }
-            
-            // A矩阵的x分量
-            A_matrix_[2 * l][2 * m] = sum_x;
-            A_matrix_[2 * l][2 * m + 1] = 0.0;
-            // A矩阵的y分量
-            A_matrix_[2 * l + 1][2 * m] = 0.0;
-            A_matrix_[2 * l + 1][2 * m + 1] = sum_y;
-        }
-    }
-}
-
-void LBESolver::computeInverseMatrix() {
-    const int n = static_cast<int>(A_matrix_.size());
-    A_inv_.assign(n, std::vector<double>(n, 0.0));
-    
-    // 单位矩阵
-    for (int i = 0; i < n; i++) {
-        A_inv_[i][i] = 1.0;
-    }
-    
-    // 高斯-约旦消元法
-    for (int i = 0; i < n; i++) {
-        // 寻找主元
-        int max_row = i;
-        double max_val = std::abs(A_matrix_[i][i]);
-        
-        for (int k = i + 1; k < n; k++) {
-            const double val = std::abs(A_matrix_[k][i]);
-            if (val > max_val) {
-                max_val = val;
-                max_row = k;
-            }
-        }
-        
-        // 交换行
-        if (max_row != i) {
-            std::swap(A_matrix_[i], A_matrix_[max_row]);
-            std::swap(A_inv_[i], A_inv_[max_row]);
-        }
-        
-        // 检查奇异矩阵
-        if (std::abs(A_matrix_[i][i]) < std::numeric_limits<double>::epsilon()) {
-            std::cerr << "Error: Matrix is singular!" << std::endl;
-            return;
-        }
-        
-        // 归一化
-        const double pivot = A_matrix_[i][i];
-        for (int j = 0; j < n; j++) {
-            A_matrix_[i][j] /= pivot;
-            A_inv_[i][j] /= pivot;
-        }
-        
-        // 消元
-        for (int k = 0; k < n; k++) {
-            if (k != i) {
-                const double factor = A_matrix_[k][i];
-                for (int j = 0; j < n; j++) {
-                    A_matrix_[k][j] -= factor * A_matrix_[i][j];
-                    A_inv_[k][j] -= factor * A_inv_[i][j];
-                }
-            }
-        }
-    }
-}
-
 void LBESolver::computeEquilibrium() {
     const int nx = grid_size_.nx;
     const int ny = grid_size_.ny;
-    
+
     #pragma omp parallel for collapse(2)
     for (int i = 0; i < nx; i++) {
         for (int j = 0; j < ny; j++) {
             const double rho_val = rho_[i][j];
             const double ux_val = ux_[i][j];
             const double uy_val = uy_[i][j];
-            
+
             for (int alpha = 0; alpha < Q; alpha++) {
                 const double eu = EX[alpha] * ux_val + EY[alpha] * uy_val;
                 const double uu = ux_val * ux_val + uy_val * uy_val;
-                
+
                 feq_[i][j][alpha] = OMEGA[alpha] * rho_val *
                                   (1.0 + eu / CS2 + 0.5 * (eu * eu) / (CS2 * CS2) - 0.5 * uu / CS2);
             }
         }
     }
+}
+
+void LBESolver::setupBoundary(ImmersedBoundary& ib) {
+    ib_method_ = std::make_unique<ImmersedBoundary>(std::move(ib));
+    ib_method_->initialize(grid_size_);
+}
+
+void LBESolver::clearBoundary() {
+    ib_method_.reset();
 }
 
 void LBESolver::collisionStep() {
@@ -295,53 +180,10 @@ void LBESolver::computeMacroscopic() {
 }
 
 void LBESolver::computeBoundaryVelocityCorrection() {
-    const int n_boundary = static_cast<int>(boundary_points_.size());
-    const int b_size = n_boundary * 2;
-    
-    // 计算右端项 b = U_B - sum(u* * D)
-    std::vector<double> b(b_size, 0.0);
-    
-    for (int l = 0; l < n_boundary; l++) {
-        double sum_ux = 0.0, sum_uy = 0.0;
-        
-        const int x_start = std::max(0, static_cast<int>(boundary_points_[l].x - 3));
-        const int x_end = std::min(grid_size_.nx, static_cast<int>(boundary_points_[l].x + 4));
-        const int y_start = std::max(0, static_cast<int>(boundary_points_[l].y - 3));
-        const int y_end = std::min(grid_size_.ny, static_cast<int>(boundary_points_[l].y + 4));
-        
-        for (int i = x_start; i < x_end; i++) {
-            for (int j = y_start; j < y_end; j++) {
-                const double D_il = interpolationD(i, j, boundary_points_[l].x, boundary_points_[l].y);
-                sum_ux += u_star_x_[i][j] * D_il;
-                sum_uy += u_star_y_[i][j] * D_il;
-            }
-        }
-        
-        b[2 * l] = boundary_points_[l].ux - sum_ux;
-        b[2 * l + 1] = boundary_points_[l].uy - sum_uy;
-    }
-    
-    // 求解线性系统 AX = b
-    std::vector<double> X(b_size, 0.0);
-    for (int i = 0; i < b_size; i++) {
-        for (int j = 0; j < b_size; j++) {
-            X[i] += A_inv_[i][j] * b[j];
-        }
-    }
-    
-    // 将边界速度修正应用到欧拉网格
-    #pragma omp parallel for collapse(2)
-    for (int i = 0; i < grid_size_.nx; i++) {
-        for (int j = 0; j < grid_size_.ny; j++) {
-            delta_u_x_[i][j] = 0.0;
-            delta_u_y_[i][j] = 0.0;
-            
-            for (int l = 0; l < n_boundary; l++) {
-                const double D_ij = interpolationD(i, j, boundary_points_[l].x, boundary_points_[l].y);
-                delta_u_x_[i][j] += X[2 * l] * D_ij * boundary_points_[l].ds;
-                delta_u_y_[i][j] += X[2 * l + 1] * D_ij * boundary_points_[l].ds;
-            }
-        }
+    if (ib_method_ && ib_method_->isInitialized()) {
+        ib_method_->computeVelocityCorrection(u_star_x_, u_star_y_,
+                                            delta_u_x_, delta_u_y_,
+                                            grid_size_);
     }
 }
 
@@ -373,16 +215,42 @@ void LBESolver::applyInletBoundary(double inlet_velocity) {
 }
 
 void LBESolver::applyOutletBoundary() {
-    // 在右边界(x=nx-1)设置零梯度出口条件
+    // 自由出口边界条件（Free outflow boundary condition）
+    // 使用二阶外推：出口值等于内部节点的外推值
+    // f_out = 2*f_inner - f_more_inner (二阶精度)
     const int nx = grid_size_.nx;
     const int ny = grid_size_.ny;
-    
+
     for (int j = 0; j < ny; j++) {
-        // 零梯度条件：出口值等于相邻内部节点值
-        rho_[nx - 1][j] = rho_[nx - 2][j];
-        ux_[nx - 1][j] = ux_[nx - 2][j];
-        uy_[nx - 1][j] = uy_[nx - 2][j];
+        // 二阶零梯度条件（出口速度等于相邻内部节点的外推值）
+        ux_[nx - 1][j] = 2.0 * ux_[nx - 2][j] - ux_[nx - 3][j];
+        uy_[nx - 1][j] = 2.0 * uy_[nx - 2][j] - uy_[nx - 3][j];
+        rho_[nx - 1][j] = 2.0 * rho_[nx - 2][j] - rho_[nx - 3][j];
+
+        // 同时更新分布函数（使用外推）
+        for (int alpha = 0; alpha < Q; alpha++) {
+            // 只对向外流动的方向进行外推
+            if (EX[alpha] > 0) {  // 流出方向
+                f_[nx - 1][j][alpha] = 2.0 * f_[nx - 2][j][alpha] - f_[nx - 3][j][alpha];
+            } else if (EX[alpha] == 0) {
+                // 零速度方向，保持不变
+            }
+            // 对于向内流动的方向，使用平衡态
+        }
     }
+
+    // 对右上角和右下角进行角点处理
+    // 右边界顶部角点
+    int j = ny - 1;
+    ux_[nx - 1][j] = 2.0 * ux_[nx - 2][j] - ux_[nx - 3][j];
+    uy_[nx - 1][j] = 2.0 * uy_[nx - 2][j] - uy_[nx - 3][j];
+    rho_[nx - 1][j] = 2.0 * rho_[nx - 2][j] - rho_[nx - 3][j];
+
+    // 右边界底部角点
+    j = 0;
+    ux_[nx - 1][j] = 2.0 * ux_[nx - 2][j] - ux_[nx - 3][j];
+    uy_[nx - 1][j] = 2.0 * uy_[nx - 2][j] - uy_[nx - 3][j];
+    rho_[nx - 1][j] = 2.0 * rho_[nx - 2][j] - rho_[nx - 3][j];
 }
 
 void LBESolver::outputVTK(int step) {
@@ -391,16 +259,11 @@ void LBESolver::outputVTK(int step) {
 }
 
 void LBESolver::solve() {
-    // 设置圆形边界（直径=10，半径=5），位置在(50, 50)
-    const double radius = 5.0;
-    const double center_x = 50.0;
-    const double center_y = 50.0;
-    setupCircularBoundary(radius, center_x, center_y);
-    
     // 计算Re=50对应的入口速度
+    // 注意：入口速度现在需要在main.cpp中根据具体几何形状计算
     const double viscosity = (params_.tau - 0.5) * CS2;
-    const double characteristic_length = 2.0 * radius;  // 直径
     const double reynolds_number = 50.0;
+    const double characteristic_length = 10.0;  // 默认特征长度
     const double inlet_velocity = reynolds_number * viscosity / characteristic_length;
     
     std::cout << "Reynolds number: " << reynolds_number << std::endl;

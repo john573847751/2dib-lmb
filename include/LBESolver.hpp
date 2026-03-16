@@ -3,6 +3,7 @@
 #include "Constants.hpp"
 #include "Types.hpp"
 #include "VTKWriter.hpp"
+#include "ImmersedBoundary.hpp"
 #include <vector>
 #include <string>
 #include <memory>
@@ -26,9 +27,11 @@ public:
     // 主求解函数
     void solve();
     
-    // 设置边界条件（圆形边界）
-    void setupCircularBoundary(double radius, double center_x, double center_y,
-                               const std::vector<double>& boundary_velocity = {0.0, 0.0});
+    // 设置边界条件（使用浸没边界方法）
+    void setupBoundary(ImmersedBoundary& ib);
+
+    // 清除边界条件
+    void clearBoundary();
     
     // 获取结果
     const ScalarField& getDensity() const { return rho_; }
@@ -57,12 +60,8 @@ private:
     DistributionFunction feq_;     // 平衡分布函数
     DistributionFunction f_temp_;  // 临时分布函数
     
-    // 边界信息
-    std::vector<BoundaryPoint> boundary_points_;
-    
-    // 矩阵A用于求解边界速度修正
-    std::vector<std::vector<double>> A_matrix_;
-    std::vector<std::vector<double>> A_inv_;    // A的逆矩阵
+    // 浸没边界方法
+    std::unique_ptr<ImmersedBoundary> ib_method_;
     
     // VTK写入器
     std::unique_ptr<VTKWriter> vtk_writer_;
@@ -75,15 +74,9 @@ private:
     void computeMacroscopic();
     void computeBoundaryVelocityCorrection();
     void computeForceDensity();
-    void buildMatrixA();
-    void computeInverseMatrix();
     void outputVTK(int step);
     void applyInletBoundary(double inlet_velocity);
     void applyOutletBoundary();
-    
-    // 辅助函数
-    double deltaFunction(double r) const;
-    double interpolationD(int i, int j, double x_B, double y_B) const;
 };
 
 } // namespace lbm

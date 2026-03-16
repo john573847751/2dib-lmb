@@ -113,4 +113,4 @@ const int output_interval = 200;  // VTK输出间隔
 ## 参考资料
 
 - [The Lattice Boltzmann Method: Principles and Practice](https://doi.org/10.1007/978-3-319-44649-3)
-- [Immersed Boundary Method for LBE](https://doi.org/10.1006/jcph.2001.6843)
+

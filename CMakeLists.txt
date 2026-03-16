@@ -35,6 +35,7 @@ set(SOURCES
     src/main.cpp
     src/LBESolver.cpp
     src/VTKWriter.cpp
+    src/ImmersedBoundary.cpp
 )
 
 # 创建可执行文件
